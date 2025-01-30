@@ -126,23 +126,88 @@ const learnerSubmissions = [
 ];
 
 // Validation of Data:
-//Validate assignmentGroup for the course
-function validateData(courseInfo, assignmentGroup) {
+
+function getLearnerData(courseInfo, assignmentGroup, learnerSubmissions) {
+    try {
         if (assignmentGroup.course_id !== courseInfo.id) {
             throw new Error(`AssignmentGroup ${assignmentGroup.id} does not belong to course ${courseInfo.id}`);
         }
+
+//Assignment lookup
+const assignmentMap = {};  
+assignmentGroup.assignmentInfo.forEach(assignment => {
+    if (typeof assignment.points_possible !== "number" || assignment.points_possible < 0) {
+        throw new Error(`Invalid points_possible for assignment ${assignment.id}`);
     }
+    if (assignment.points_possible === 0) {
+        throw new Error(`points_possible cannot be zero for assignment ${assignment.id}`);
+    }
+    assignmentMap[assignment.id] = {
+        points_possible: assignment.points_possible,
+        due_at: new Date(assignment.due_at)
+    };
+});
+
+// Create learnerData 
+const learnerData = {};
+
+learnerSubmissions.forEach(submission => {
+    const { learner_id, assignment_id, submission: { score } } = submission;
+
+    if (!assignmentMap[assignment_id]) {
+        console.warn(`Skipping submission for unknown assignment ID: ${assignment_id}`);
+        return;
+    }
+
+    const dueDate = assignmentMap[assignment_id].due_at;
+    const submitDate = new Date(submission.submitted_at);
+
+    if (submitDate > dueDate) {
+        console.warn(`Skipping early submission for assignment ${assignment_id}`);
+        return;
+    }
+
+    //late submission penalty
+    let finalScore = score;
+    if (submitDate > dueDate) {
+        finalScore -= 0.1 * assignmentMap[assignment_id].points_possible;
+    }
+
+    if (!learnerData[learner_id]) {
+        learnerData[learner_id] = { learner_id, assignments: {} };
+    }
+
+    learnerData[learner_id].assignments[assignment_id] = finalScore / assignmentMap[assignment_id].points_possible;
+});
+
+// Calculate weighted average for each learner
+Object.values(learnerData).forEach(learner => {
+    let totalScore = 0, totalPossible = 0;
+
+    Object.entries(learner.assignments).forEach(([assignmentId, percentageScore]) => {
+        assignmentId = Number(assignmentId); 
+        if (assignmentMap[assignmentId]) {
+            let points_possible = assignmentMap[assignmentId].points_possible;
+            totalScore += percentageScore * points_possible;
+            totalPossible += points_possible;
+        }
+    });
+
+    learner.avg = totalPossible > 0 ? totalScore / totalPossible : 0;
+});
+
+
+return Object.values(learnerData);
+    } catch (error) {
+        console.error("Error processing learner data:", error.message);
+        return [];
+    }
+}
+
+console.log(getLearnerData(courseInfo, assignmentGroup, learnerSubmissions));
 
 /* The variable assignmentMap is an object that serves as a lookup table (or dictionary) to store assignment details efficiently.
 
 Purpose:
 It allows quick access to assignment information (points_possible and due_at) using an assignment's id as the key.
 Instead of iterating over assignmentInfo every time we need assignment details, we can directly retrieve them from assignmentMap in constant time O(1).*/
-
-const assignmentMap = {};  // Define assignmentMap before use
-assignmentGroup.assignmentInfo.forEach(assignment => {
-    assignmentMap[assignment.id] = {
-        points_possible: assignment.points_possible,
-        due_at: new Date(assignment.due_at)
-    };
-});
